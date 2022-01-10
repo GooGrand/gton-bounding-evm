@@ -4,3 +4,5 @@ typechain/
 abi/
 cache/
 artifacts/
+contracts/artifacts/
+contracts/interfaces/artifacts/
