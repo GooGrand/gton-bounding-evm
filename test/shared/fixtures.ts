@@ -1,12 +1,15 @@
 import { ethers } from "hardhat"
 import { BigNumber, Contract } from "ethers"
 import { Fixture } from "ethereum-waffle"
+import { getFactory } from "./utils";
 
 import { Bounding } from "../../typechain/Bounding"
 import { WETH9 } from "../../typechain/WETH9"
 import { ERC20 } from "../../typechain/ERC20"
 import { TestAggregator } from "../../typechain/TestAggregator"
 import { TestCan } from "../../typechain/TestCan"
+
+import { CompoundStaking__factory as compoundMeta } from "../../gton-farms-evm/types/factories/CompoundStaking__factory"
 
 interface TokensFixture {
     weth: WETH9,
@@ -50,8 +53,16 @@ export const boundingFixture: Fixture<Boundingfixture> = async function ([
     const token0Can = (await canFactory.deploy(token0.address)) as TestCan;
     const token1Can = (await canFactory.deploy(token1.address)) as TestCan;
     const wethCan = (await canFactory.deploy(weth.address)) as TestCan;
-    const bounfingF = await ethers.getContractFactory("Bounding")
-    const bounding = (await bounfingF.deploy(gton.address, treasury.address, gtonAgg.address)) as Bounding
+    const libFactory = await ethers.getContractFactory("AddressArrayLib")
+    const lib = await libFactory.deploy();
+    const compoundF = new compoundMeta({"__$fe4bb86d0d47fb102a6badbbe029860ef4$__": lib.address});
+    const compound = compoundF.deploy(gton.address, BigNumber.from("150000"), "sGTON", "sGTON", 250, 15)
+    const bounfingF = await ethers.getContractFactory("Bounding", {
+        libraries: {
+          AddressArrayLib: lib.address,
+        }
+    });
+    const bounding = (await bounfingF.deploy(weth.address, gton.address, gtonAgg.address, treasury.address, )) as Bounding
     return {
         weth,
         token0,

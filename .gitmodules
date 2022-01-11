@@ -1,0 +1,3 @@
+[submodule "gton-farms-evm"]
+	path = gton-farms-evm
+	url = git@github.com:GTON-capital/gton-farms-evm.git

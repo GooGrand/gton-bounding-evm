@@ -1,4 +1,5 @@
-import { BigNumber } from "ethers"
+import { ethers } from "hardhat"
+import { BigNumber, BytesLike, ContractFactory } from "ethers"
 
 import { TestAggregator } from "../../typechain/TestAggregator"
 import { TestCan } from "../../typechain/TestCan"
@@ -19,3 +20,12 @@ export async function mineBlocks(provider: any, blocks: number): Promise<void> {
         blocks -= 1
     }
 }
+export async function getFactory({
+    abi,
+    bytecode,
+  }: {
+    abi: any[]
+    bytecode: BytesLike
+  }): Promise<ContractFactory> {
+    return await ethers.getContractFactory(abi, bytecode)
+  }

@@ -74,8 +74,8 @@
       ]
     },
     "/Users/googrand/projects/bonding/contracts/Bounding.sol": {
-      "lastModificationDate": 1639557763782,
-      "contentHash": "eded73207c5edb485ba3bd9bf365b1d2",
+      "lastModificationDate": 1641818630999,
+      "contentHash": "48ecf50900792ff8b5f6907bcadd5e96",
       "sourceName": "contracts/Bounding.sol",
       "solcConfig": {
         "version": "0.8.0",
@@ -101,9 +101,11 @@
         }
       },
       "imports": [
-        "hardhat/console.sol",
         "./interfaces/IERC20.sol",
-        "./interfaces/ICan.sol",
+        "./interfaces/IStaking.sol",
+        "./interfaces/IWETH.sol",
+        "./libraries/UniswapV2Library.sol",
+        "./libraries/AddressArrayLibrary.sol",
         "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol",
         "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol"
       ],
@@ -111,12 +113,13 @@
         "^0.8.0"
       ],
       "artifacts": [
-        "Bounding"
+        "Bounding",
+        "ICan"
       ]
     },
     "/Users/googrand/projects/bonding/contracts/interfaces/IERC20.sol": {
-      "lastModificationDate": 1639466127303,
-      "contentHash": "037a79ccbffa48013743790a0116a0bc",
+      "lastModificationDate": 1641802132892,
+      "contentHash": "762b13eaad6e95243d89ff45361f16a7",
       "sourceName": "contracts/interfaces/IERC20.sol",
       "solcConfig": {
         "version": "0.8.0",
@@ -505,6 +508,117 @@
       ],
       "artifacts": [
         "console"
+      ]
+    },
+    "/Users/googrand/projects/bonding/contracts/interfaces/IStaking.sol": {
+      "lastModificationDate": 1641802132835,
+      "contentHash": "03526298a94da0334d18764496b45d8a",
+      "sourceName": "contracts/interfaces/IStaking.sol",
+      "solcConfig": {
+        "version": "0.8.0",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.8.0"
+      ],
+      "artifacts": [
+        "IStaking"
+      ]
+    },
+    "/Users/googrand/projects/bonding/contracts/libraries/AddressArrayLibrary.sol": {
+      "lastModificationDate": 1641802371299,
+      "contentHash": "5b1702802719b99e0fae5d0a207d3304",
+      "sourceName": "contracts/libraries/AddressArrayLibrary.sol",
+      "solcConfig": {
+        "version": "0.8.0",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [],
+      "versionPragmas": [
+        ">=0.8.0"
+      ],
+      "artifacts": [
+        "AddressArrayLib"
+      ]
+    },
+    "/Users/googrand/projects/bonding/contracts/BoundingLegacy.sol": {
+      "lastModificationDate": 1641880489514,
+      "contentHash": "a83532fa1dbcab76e94b137b9c80463a",
+      "sourceName": "contracts/BoundingLegacy.sol",
+      "solcConfig": {
+        "version": "0.8.0",
+        "settings": {
+          "optimizer": {
+            "enabled": true,
+            "runs": 200
+          },
+          "outputSelection": {
+            "*": {
+              "*": [
+                "abi",
+                "evm.bytecode",
+                "evm.deployedBytecode",
+                "evm.methodIdentifiers",
+                "metadata"
+              ],
+              "": [
+                "ast"
+              ]
+            }
+          }
+        }
+      },
+      "imports": [
+        "./interfaces/IERC20.sol",
+        "./interfaces/ICan.sol",
+        "./libraries/AddressArrayLibrary.sol",
+        "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol",
+        "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol"
+      ],
+      "versionPragmas": [
+        "^0.8.0"
+      ],
+      "artifacts": [
+        "BoundingLegacy"
       ]
     }
   }
