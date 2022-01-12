@@ -74,8 +74,6 @@ export const boundingFixture: Fixture<Boundingfixture> = async function ([
         BigNumber.from("100000000"),
         )) as Bounding
 
-    await compound.setAdmins([bounding.address]);
-    
     return {
         weth,
         token0,

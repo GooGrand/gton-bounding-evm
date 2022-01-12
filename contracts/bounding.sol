@@ -63,7 +63,7 @@ interface ICan {
         );
 }
 
-contract Bounding is IERC20 {
+contract Bounding {
     bool public revertFlag;
     uint256 public contractRequiredGtonShare;
     uint256 public allowedRewardPerTry;
@@ -398,8 +398,9 @@ contract Bounding is IERC20 {
         uint256 accumulatedAmount = accumulateUserRewards(msg.sender);
         staking.transferShare(to, accumulatedAmount);
         contractRequiredGtonShare -= accumulatedAmount;
-        emit Claim(msg.sender, to, accumulatedAmount);
+        emit TransferShare(msg.sender, to, accumulatedAmount);
     }
 
-    event Claim(address from, address to, uint amount);
+    event Transfer(address from, address to, uint amount);
+    event TransferShare(address from, address to, uint amount);
 }
