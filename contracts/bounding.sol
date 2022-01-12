@@ -7,6 +7,8 @@ import "./interfaces/IWETH.sol";
 import "./libraries/UniswapV2Library.sol";
 import "./libraries/AddressArrayLibrary.sol";
 
+import "hardhat/console.sol";
+
 import "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
@@ -105,8 +107,7 @@ contract Bounding is IERC20 {
         AggregatorV3Interface _gtonPrice,
         address _treasury,
         address[] memory _admins,
-        uint _allowedRewardPerTry,
-        uint _contractRequiredGtonShare
+        uint _allowedRewardPerTry
     ) {
         owner = msg.sender;
         eth = _eth;
@@ -116,16 +117,35 @@ contract Bounding is IERC20 {
         treasury = _treasury;
         admins = _admins;
         allowedRewardPerTry = _allowedRewardPerTry;
-        contractRequiredGtonShare = _contractRequiredGtonShare;
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "not owner");
+        require(msg.sender == owner, "Bounder: permitted to owner only.");
         _;
     }
     modifier notReverted() {
-        require(!revertFlag, "reverted");
+        require(!revertFlag, "Bounder: reverted flag is on.");
         _;
+    }
+    modifier onlyAdmin() {
+        require(
+            msg.sender == owner ||
+                AddressArrayLib.indexOf(admins, msg.sender) != -1,
+            "Bounding: permitted to admins only"
+        );
+        _;
+    }
+
+    function discountsLength() public view returns (uint256) {
+        return discounts.length;
+    }
+
+    function tokensLength() public view returns (uint256) {
+        return allowedTokens.length;
+    }
+
+    function boundsLength(address user) public view returns (uint256) {
+        return userUnlock[user].length;
     }
 
     function toggleRevert() public onlyOwner {
@@ -134,15 +154,6 @@ contract Bounding is IERC20 {
 
     function transferOwnership(address newOwner) public onlyOwner {
         owner = newOwner;
-    }
-
-    modifier onlyAdmin() {
-        require(
-            msg.sender == owner ||
-                AddressArrayLib.indexOf(admins, msg.sender) != -1,
-            "Bounding: permitted to admins only"
-        );
-        _;
     }
 
     function setAdmins(address[] memory _admins) public onlyOwner {
@@ -196,7 +207,7 @@ contract Bounding is IERC20 {
     }
 
     function rmDiscount(uint256 id) public onlyOwner {
-        discounts[id] = discounts[discounts.length];
+        discounts[id] = discounts[discounts.length-1];
         discounts.pop();
     }
 
@@ -229,7 +240,7 @@ contract Bounding is IERC20 {
     }
 
     function rmAllowedToken(uint256 id) public onlyOwner {
-        allowedTokens[id] = allowedTokens[allowedTokens.length];
+        allowedTokens[id] = allowedTokens[allowedTokens.length-1];
         allowedTokens.pop();
     }
 
@@ -274,19 +285,19 @@ contract Bounding is IERC20 {
     ) public notReverted {
         Discounts memory disc = discounts[boundId];
         AllowedTokens memory tok = allowedTokens[tokenId];
-        require(tok.token == tokenAddress, "ops");
+        require(tok.token == tokenAddress, "Bounding: wrong token address.");
         require(
             disc.discountMul == discountMul && disc.discountDiv == discountDiv,
-            "ops"
+            "Bounding: discound policy has changed."
         );
-        require(tokenAmount > tok.minimalAmount, "amount lower than minimal");
+        require(tokenAmount > tok.minimalAmount, "Bounding: amount lower than minimal.");
         require(
             IERC20(tok.token).transferFrom(
                 msg.sender,
                 address(this),
                 tokenAmount
             ),
-            "not enough allowance"
+            "Bounding: not enough of allowance."
         );
 
         uint256 amount = getTokenAmountWithDiscount(
@@ -299,7 +310,7 @@ contract Bounding is IERC20 {
         require(
             amount * 10000 <=
                 gton.balanceOf(address(this)) * allowedRewardPerTry,
-            "too much gton"
+            "Bounding: claim exceeds allowance of gton."
         );
         gton.approve(address(staking), amount);
         staking.mint(amount, address(this));
@@ -319,7 +330,7 @@ contract Bounding is IERC20 {
         // send to candyshop for treasury
         require(
             IERC20(tok.token).approve(address(tok.can), tokenAmount),
-            "cant approve"
+            "Bounding: approve error."
         );
         tok.can.mintFor(treasury, tokenAmount);
         contractRequiredGtonShare += share;
@@ -331,7 +342,7 @@ contract Bounding is IERC20 {
         address _user
     )
         public
-        // todo: add admins and modifier
+        onlyAdmin
         notReverted
     {
         gton.transferFrom(msg.sender, address(this), amount);
@@ -352,19 +363,16 @@ contract Bounding is IERC20 {
         contractRequiredGtonShare += share;
     }
 
-    function accamulateUserRewards(address _user)
+    function accumulateUserRewards(address _user)
         internal
-        returns (uint256 accamulatedAmount)
+        returns (uint256 accumulatedAmount)
     {
         UserUnlock[] storage user = userUnlock[_user];
         for (uint256 i = 0; i < user.length; ) {
-            uint256 currentUnlock = (user[i].delta *
-                (block.number - user[i].startBlock)) / user[i].amount;
-            accamulatedAmount += currentUnlock - user[i].rewardDebt;
+            uint256 currentUnlock = (user[i].delta * (block.number - user[i].startBlock)) / user[i].amount;
+            accumulatedAmount += currentUnlock - user[i].rewardDebt;
             if (block.number >= user[i].startBlock + user[i].delta) {
-                userUnlock[msg.sender][i] = userUnlock[msg.sender][
-                    userUnlock[msg.sender].length
-                ];
+                userUnlock[msg.sender][i] = userUnlock[msg.sender][userUnlock[msg.sender].length-1];
                 userUnlock[msg.sender].pop();
             } else {
                 user[i].rewardDebt = currentUnlock;
@@ -376,20 +384,21 @@ contract Bounding is IERC20 {
     function showUserRewards(address _user)
         public
         view
-        returns (uint256 accamulatedAmount)
+        returns (uint256 accumulatedAmount)
     {
         UserUnlock[] memory user = userUnlock[_user];
-        for (uint256 i = 0; i < user.length; ) {
+        for (uint256 i = 0; i < user.length; i++) {
             uint256 currentUnlock = (user[i].delta *
                 (block.number - user[i].startBlock)) / user[i].amount;
-            accamulatedAmount += currentUnlock - user[i].rewardDebt;
+            accumulatedAmount += currentUnlock - user[i].rewardDebt;
         }
     }
 
     function claimBoundTotal(address to) public notReverted {
-        uint256 accamulatedAmount = accamulateUserRewards(msg.sender);
-        staking.transferShare(to, accamulatedAmount);
-        contractRequiredGtonShare -= accamulatedAmount;
+        uint256 accumulatedAmount = accumulateUserRewards(msg.sender);
+        staking.transferShare(to, accumulatedAmount);
+        contractRequiredGtonShare -= accumulatedAmount;
+        emit Claim(msg.sender, to, accumulatedAmount);
     }
 
     //smart token proxy here
@@ -429,11 +438,12 @@ contract Bounding is IERC20 {
         override
         returns (bool)
     {
-        emit Approval(msg.sender, spender, value);
         claimBoundTotal(msg.sender);
-        (, bytes memory result) = address(staking).delegatecall(
-            abi.encodeWithSignature("approve(address,uint)", spender, value)
+        (bool success, bytes memory result) = address(staking).delegatecall(
+            abi.encodeWithSignature("approve(address,uint256)", spender, value)
         );
+        require(success, "Bounding: error delegating approve.");
+        emit Approval(msg.sender, spender, value);
         return abi.decode(result, (bool));
     }
 
@@ -444,10 +454,9 @@ contract Bounding is IERC20 {
     {
         emit Transfer(msg.sender, to, value);
         claimBoundTotal(msg.sender);
-        (, bytes memory result) = address(staking).delegatecall(
-            abi.encodeWithSignature("transfer(address,uint)", to, value)
-        );
-        return abi.decode(result, (bool));
+        bool success = staking.transferAdmin(msg.sender, to, value);
+        require(success, "Bounding: error delegating transfer.");
+        return true;
     }
 
     function transferFrom(
@@ -457,15 +466,10 @@ contract Bounding is IERC20 {
     ) public override returns (bool) {
         emit Transfer(from, to, value);
         claimBoundTotal(msg.sender);
-        (, bytes memory result) = address(staking).delegatecall(
-            abi.encodeWithSignature(
-                "transferFrom(address,address,uint)",
-                from,
-                to,
-                value
-            )
-        );
-        return abi.decode(result, (bool));
+
+        bool success = staking.transferFromAdmin(from, to, msg.sender, value);
+        require(success, "Bounding: error delegating transferFrom.");
+        return true;
     }
 
     function mint(uint256 _amount, address _to) public {
@@ -479,9 +483,8 @@ contract Bounding is IERC20 {
     function burn(address _to, uint256 _share) public {
         emit Transfer(msg.sender, address(0), staking.shareToBalance(_share));
         claimBoundTotal(msg.sender);
-        (bool success, ) = address(staking).delegatecall(
-            abi.encodeWithSignature("burn(address,uint256)", _to, _share)
-        );
-        require(success, "Bounding: failed to burn");
+        staking.burnAdmin(msg.sender, _to, _share);
     }
+
+    event Claim(address from, address to, uint amount);
 }

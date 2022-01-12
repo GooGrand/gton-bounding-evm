@@ -74,8 +74,8 @@
       ]
     },
     "/Users/googrand/projects/bonding/contracts/Bounding.sol": {
-      "lastModificationDate": 1641818630999,
-      "contentHash": "48ecf50900792ff8b5f6907bcadd5e96",
+      "lastModificationDate": 1642015741369,
+      "contentHash": "e5704f94492672126a0933d91ef49f8d",
       "sourceName": "contracts/Bounding.sol",
       "solcConfig": {
         "version": "0.8.0",
@@ -106,6 +106,7 @@
         "./interfaces/IWETH.sol",
         "./libraries/UniswapV2Library.sol",
         "./libraries/AddressArrayLibrary.sol",
+        "hardhat/console.sol",
         "@uniswap/v2-core/contracts/interfaces/IUniswapV2Factory.sol",
         "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol"
       ],
@@ -511,8 +512,8 @@
       ]
     },
     "/Users/googrand/projects/bonding/contracts/interfaces/IStaking.sol": {
-      "lastModificationDate": 1641802132835,
-      "contentHash": "03526298a94da0334d18764496b45d8a",
+      "lastModificationDate": 1642015474248,
+      "contentHash": "abb141fd8cde02cdbe2f2379d857a58b",
       "sourceName": "contracts/interfaces/IStaking.sol",
       "solcConfig": {
         "version": "0.8.0",

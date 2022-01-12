@@ -9,16 +9,17 @@ import { WETH9 } from "../typechain/WETH9"
 import { ERC20 } from "../typechain/ERC20"
 import { TestAggregator } from "../typechain/TestAggregator"
 import { TestCan } from "~/typechain/TestCan"
+import { CompoundStaking } from "~/gton-farms-evm/types/CompoundStaking"
 
 import {expandTo18Decimals, TokenData, mineBlocks} from "./shared/utils"
 
 describe("Bounding", () => {
-  const [wallet, treasury, other] = waffle.provider.getWallets()
+  const [wallet, treasury, admin0, admin1, bob, alice, denice, other] = waffle.provider.getWallets()
 
   let loadFixture: ReturnType<typeof waffle.createFixtureLoader>
 
   before("create fixture loader", async () => {
-    loadFixture = waffle.createFixtureLoader([wallet, treasury, other], waffle.provider)
+    loadFixture = waffle.createFixtureLoader([wallet, treasury, admin0, admin1, other], waffle.provider)
   })
 
   let weth: WETH9
@@ -27,6 +28,7 @@ describe("Bounding", () => {
   let gton: ERC20
 
   let bounding: Bounding
+  let compound: CompoundStaking
 
   let token0Agg: TestAggregator
   let token1Agg: TestAggregator
@@ -52,7 +54,8 @@ describe("Bounding", () => {
       wethAgg,
       token1Can,
       token0Can,
-      wethCan
+      wethCan,
+      compound,
     } = await loadFixture(boundingFixture))
 
     tokens = [
@@ -196,6 +199,8 @@ describe("Bounding", () => {
     }
     await expect(bounding.connect(other).rmAllowedToken(0)).to.be.revertedWith("Bounder: permitted to owner only.");
     expect(await bounding.tokensLength()).to.eq(tokens.length);
+    console.log(await bounding.tokensLength());
+    
     await bounding.rmAllowedToken(0)
 
     // expect 3rd element to be swapped in place of 1st
@@ -249,22 +254,22 @@ describe("Bounding", () => {
     await addToken(token) // id 0 
 
     await gton.transfer(bounding.address, expandTo18Decimals(10000))
-    await expect(bounding.claimBound("1000", 0, wallet.address)).to.be.reverted; // throws error out of bounds
+    await expect(bounding.claimBoundTotal(wallet.address)).to.be.reverted; // throws error out of bounds
 
     await token0.approve(bounding.address, token.minimalAmount);
     await bounding.createBound(0, 0, token0.address, token.minimalAmount, dis.discountMul, dis.discountDiv)
 
     const recvAmount = await bounding.getTokenAmountWithDiscount(dis.discountMul, dis.discountDiv, token0Agg.address, token.minimalAmount)
     const maxAmount1 = recvAmount.div(dis.delta)
-    await expect(bounding.claimBound(maxAmount1.add(1), 0, wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
+    await expect(bounding.claimBoundTotal(wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
     
     await mineBlocks(waffle.provider, 6000)
     
     const balanceBefore = await gton.balanceOf(wallet.address)
     const maxAmount2 = recvAmount.mul(6000).div(dis.delta)
-    await expect(bounding.claimBound(maxAmount2.add(1), 0, wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
+    await expect(bounding.claimBoundTotal(wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
     
-    bounding.claimBound(maxAmount2, 0, wallet.address)
+    bounding.claimBoundTotal(wallet.address)
     expect(await gton.balanceOf(wallet.address)).to.eq(balanceBefore.add(maxAmount2))
     await expect(bounding.userUnlock(wallet.address, 0)).to.be.reverted;
   })
@@ -317,4 +322,145 @@ describe("Bounding", () => {
     expect(await gton.balanceOf(other.address)).to.eq(total)
   })
 
+
+  // staking proxy tests
+
+async function getTokenPerBlock(): Promise<BigNumber> {
+    const apyUp = await compound.apyUp();
+    const apyDown = await compound.apyDown();
+    const required = await compound.requiredBalance();
+    const blocksInYear = await compound.blocksInYear();
+    return apyUp.mul(required).div(apyDown).div(blocksInYear)
+}
+
+async function fillUpCompound() {
+  const fedorValue = BigNumber.from("974426000000")
+  const deniceValue = BigNumber.from("1000000")
+  const bobValue = BigNumber.from("76499200000")
+
+  await gton.transfer(denice.address, deniceValue)
+  await gton.connect(denice).approve(compound.address, deniceValue)
+  await compound.connect(denice).mint(deniceValue, denice.address)
+
+  await gton.transfer(bob.address, bobValue)
+  await gton.connect(bob).approve(compound.address, bobValue)
+  await compound.connect(bob).mint(bobValue, bob.address)
+}
+
+it("mint", async () => {
+    const tpb = await getTokenPerBlock()
+    const amount = expandTo18Decimals(256)
+    await expect(bounding.mint(0, wallet.address)).to.be.revertedWith("Compound: Nothing to deposit")
+    await expect(bounding.mint(amount, wallet.address)).to.be.revertedWith("ERC20: transfer amount exceeds allowance")
+    await gton.approve(bounding.address, amount);
+    await bounding.mint(amount, wallet.address)
+    
+    // 0 total shares
+    const res = await compound.userInfo(wallet.address)
+    expect(res.share).to.eq(amount)
+    expect(await compound.totalShares()).to.eq(amount)
+    expect(await compound.requiredBalance()).to.eq(amount.add(tpb.mul(4))) // by the amount of sent txn in rows (98-101)
+
+    await fillUpCompound();
+    
+    const amount2 = expandTo18Decimals(150)
+    await gton.transfer(other.address, amount2)
+    await gton.connect(other).approve(bounding.address, amount2);
+
+    // const prevBlock = await compound.lastRewardBlock()
+    // const totalShares = await compound.totalShares()
+    // const requiredBalance = await compound.requiredBalance()
+
+    await bounding.connect(other).mint(amount2, other.address)
+    // const blockDelta = 1
+
+    // const updatedReq = requiredBalance.add((await getTokenPerBlock()).mul(blockDelta))
+    // const currentShare = amount2.mul(totalShares).div(updatedReq); 
+    const res2 = await compound.userInfo(other.address)
+    expect(res2.share).to.eq("149832117534176254992")
+    expect(await compound.totalShares()).to.eq("405832118584492781891")
+    expect(await compound.requiredBalance()).to.eq("406286841496373797085")
+})
+
+it("burn", async () => {
+    await fillUpCompound(); 
+
+    const amount = expandTo18Decimals(115)
+    const period = 50
+    await gton.approve(compound.address, amount)
+
+    await bounding.mint(amount, wallet.address)
+    await mineBlocks(waffle.provider, period)
+    await expect(bounding.burn(wallet.address, 0)).to.be.revertedWith("Compound: Nothing to burn")
+    const share = (await compound.userInfo(wallet.address)).share
+    
+    await expect(bounding.burn(wallet.address, share.add(expandTo18Decimals(1000)))).to.be.revertedWith("Compound: Withdraw amount exceeds balance")
+    await expect(bounding.burn(wallet.address, share)).to.be.revertedWith("ERC20: transfer amount exceeds balance")
+    await gton.transfer(compound.address, await gton.balanceOf(wallet.address));
+    
+    const requiredBalance = await compound.requiredBalance()
+    const totalShares = await compound.totalShares()
+    const tpb = await getTokenPerBlock();
+    const balanceBefore = await gton.balanceOf(wallet.address)
+
+    await bounding.burn(wallet.address, share)
+    const updRequiredBalance = requiredBalance.add(tpb.mul(55)) // hasn't updated since mineBlocs call
+    const currentAmount = updRequiredBalance.mul(share).div(totalShares)
+
+    const user = await compound.userInfo(wallet.address)
+    expect(user.share).to.eq(0)
+    
+    expect(await compound.requiredBalance()).to.eq(updRequiredBalance.sub(currentAmount))
+    expect(await compound.totalShares()).to.eq(totalShares.sub(share))
+    expect(await gton.balanceOf(wallet.address)).to.eq(balanceBefore.add(currentAmount))
+    expect(user.tokenAtLastUserAction).to.eq(await compound.balanceOf(wallet.address))
+})
+
+it("transfer", async () => {
+    const amount = BigNumber.from("1150200000000")
+    await gton.approve(bounding.address, amount);
+    await bounding.mint(amount, wallet.address)
+
+    await mineBlocks(waffle.provider, 10)
+    const balance = await bounding.balanceOf(wallet.address)
+    const share = await compound.balanceToShare(balance)
+    await bounding.transfer(other.address, balance)
+    const res = await compound.userInfo(other.address)
+    const resWallet = await compound.userInfo(wallet.address)
+    expect(res.share).to.eq(share)
+    expect(resWallet.share).to.eq(0)
+})
+
+it("approve and allowance", async () => {
+    const amount = BigNumber.from("10012412401248")
+    const secondAmount = BigNumber.from("1000000")
+    expect(await bounding.allowance(wallet.address, bob.address)).to.eq(0)
+    
+    // await expect(compound.approve(wallet.address, 0)).to.be.revertedWith("ERC20: approve to the zero address")
+    bounding.approve(alice.address, amount) 
+    console.log(await (await bounding.allowance(wallet.address, alice.address)).toString());
+    console.log(await (await compound.allowance(wallet.address, alice.address)).toString());
+    
+    expect(await bounding.allowance(wallet.address, alice.address)).to.eq(amount)
+    await bounding.approve(alice.address, secondAmount) 
+    expect(await bounding.allowance(wallet.address, alice.address)).to.eq(secondAmount)
+})
+
+it("transferFrom", async () => {
+    const amount = BigNumber.from("1012401999999")
+    await gton.approve(bounding.address, amount);
+    await bounding.mint(amount, wallet.address)
+
+    await mineBlocks(waffle.provider, 100)
+    await expect(bounding.connect(bob).transferFrom(wallet.address, bob.address, 15)).to.be.revertedWith("Bounding: error delegating transferFrom.")
+
+    const balance = await bounding.balanceOf(wallet.address)
+    await bounding.approve(bob.address, balance)
+    await bounding.connect(bob).transferFrom(wallet.address, bob.address, balance.sub(10))
+    const share = await compound.balanceToShare(balance.sub(10))
+
+    expect(await bounding.allowance(wallet.address,bob.address)).to.eq(10)
+    expect(await bounding.balanceOf(bob.address)).to.eq(share)
+
+})
 })

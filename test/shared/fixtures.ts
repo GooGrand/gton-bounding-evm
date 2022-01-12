@@ -10,6 +10,7 @@ import { TestAggregator } from "../../typechain/TestAggregator"
 import { TestCan } from "../../typechain/TestCan"
 
 import { CompoundStaking__factory as compoundMeta } from "../../gton-farms-evm/types/factories/CompoundStaking__factory"
+import { CompoundStaking } from "../../gton-farms-evm/types/CompoundStaking"
 
 interface TokensFixture {
     weth: WETH9,
@@ -31,6 +32,7 @@ async function tokensFixture(): Promise<TokensFixture> {
 
 interface Boundingfixture extends TokensFixture {
     bounding: Bounding
+    compound: CompoundStaking
     token0Agg: TestAggregator
     gtonAgg: TestAggregator
     wethAgg: TestAggregator
@@ -41,7 +43,7 @@ interface Boundingfixture extends TokensFixture {
 }
 
 export const boundingFixture: Fixture<Boundingfixture> = async function ([
-    wallet, treasury
+    wallet, treasury, admin0, admin1
 ]): Promise<Boundingfixture> {
     const { weth, token0, token1, gton } = await tokensFixture()
     const aggFactory = await ethers.getContractFactory("TestAggregator");
@@ -55,14 +57,25 @@ export const boundingFixture: Fixture<Boundingfixture> = async function ([
     const wethCan = (await canFactory.deploy(weth.address)) as TestCan;
     const libFactory = await ethers.getContractFactory("AddressArrayLib")
     const lib = await libFactory.deploy();
-    const compoundF = new compoundMeta({"__$fe4bb86d0d47fb102a6badbbe029860ef4$__": lib.address});
-    const compound = compoundF.deploy(gton.address, BigNumber.from("150000"), "sGTON", "sGTON", 250, 15)
+    const compoundF = new compoundMeta({ "__$fe4bb86d0d47fb102a6badbbe029860ef4$__": lib.address }, wallet);
+    const compound = await compoundF.deploy(gton.address, BigNumber.from("150000"), "sGTON", "sGTON", 250, 15)
     const bounfingF = await ethers.getContractFactory("Bounding", {
         libraries: {
-          AddressArrayLib: lib.address,
+            AddressArrayLib: lib.address,
         }
     });
-    const bounding = (await bounfingF.deploy(weth.address, gton.address, gtonAgg.address, treasury.address, )) as Bounding
+    const bounding = (await bounfingF.deploy(
+        weth.address, 
+        gton.address, 
+        compound.address, 
+        gtonAgg.address, 
+        treasury.address, 
+        [admin0.address, admin1.address],
+        BigNumber.from("100000000"),
+        )) as Bounding
+
+    await compound.setAdmins([bounding.address]);
+    
     return {
         weth,
         token0,
@@ -74,6 +87,7 @@ export const boundingFixture: Fixture<Boundingfixture> = async function ([
         bounding,
         gtonAgg,
         wethCan,
+        compound,
         token0Can,
         token1Can
     }
