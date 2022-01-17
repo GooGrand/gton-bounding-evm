@@ -120,18 +120,18 @@ contract Bounding {
     }
 
     modifier onlyOwner() {
-        require(msg.sender == owner, "Bounder: permitted to owner only.");
+        require(msg.sender == owner, "Bounding: permitted to owner only.");
         _;
     }
     modifier notReverted() {
-        require(!revertFlag, "Bounder: reverted flag is on.");
+        require(!revertFlag, "Bounding: reverted flag is on.");
         _;
     }
     modifier onlyAdmin() {
         require(
             msg.sender == owner ||
                 AddressArrayLib.indexOf(admins, msg.sender) != -1,
-            "Bounding: permitted to admins only"
+            "Bounding: permitted to admins only."
         );
         _;
     }
@@ -172,7 +172,7 @@ contract Bounding {
         AggregatorV3Interface price,
         ICan can,
         uint256 minimalAmount
-    ) public onlyOwner {
+    ) public onlyAdmin {
         (, , , , , , , , address token, , ) = can.canInfo();
         allowedTokens.push(
             AllowedTokens({
@@ -188,7 +188,7 @@ contract Bounding {
         address token,
         uint256 amount,
         address to
-    ) public onlyOwner {
+    ) public onlyAdmin {
         IERC20(token).transfer(to, amount);
     }
 
@@ -196,7 +196,7 @@ contract Bounding {
         uint256 delta,
         uint256 discountMul,
         uint256 discountDiv
-    ) public onlyOwner {
+    ) public onlyAdmin {
         discounts.push(
             Discounts({
                 delta: delta,
@@ -206,7 +206,7 @@ contract Bounding {
         );
     }
 
-    function rmDiscount(uint256 id) public onlyOwner {
+    function rmDiscount(uint256 id) public onlyAdmin {
         discounts[id] = discounts[discounts.length-1];
         discounts.pop();
     }
@@ -216,7 +216,7 @@ contract Bounding {
         uint256 delta,
         uint256 discountMul,
         uint256 discountDiv
-    ) public onlyOwner {
+    ) public onlyAdmin {
         discounts[id] = Discounts({
             delta: delta,
             discountMul: discountMul,
@@ -229,7 +229,7 @@ contract Bounding {
         AggregatorV3Interface price,
         ICan can,
         uint256 minimalAmount
-    ) public onlyOwner {
+    ) public onlyAdmin {
         (, , , , , , , , address token, , ) = can.canInfo();
         allowedTokens[id] = AllowedTokens({
             price: price,
@@ -239,14 +239,14 @@ contract Bounding {
         });
     }
 
-    function rmAllowedToken(uint256 id) public onlyOwner {
+    function rmAllowedToken(uint256 id) public onlyAdmin {
         allowedTokens[id] = allowedTokens[allowedTokens.length-1];
         allowedTokens.pop();
     }
 
     function changeAllowedRewardPerTry(uint256 _allowedRewardPerTry)
         public
-        onlyOwner
+        onlyAdmin
     {
         allowedRewardPerTry = _allowedRewardPerTry;
     }
@@ -290,7 +290,7 @@ contract Bounding {
             disc.discountMul == discountMul && disc.discountDiv == discountDiv,
             "Bounding: discound policy has changed."
         );
-        require(tokenAmount > tok.minimalAmount, "Bounding: amount lower than minimal.");
+        require(tokenAmount >= tok.minimalAmount, "Bounding: amount lower than minimal.");
         require(
             IERC20(tok.token).transferFrom(
                 msg.sender,

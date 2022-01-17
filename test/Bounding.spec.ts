@@ -1,6 +1,6 @@
 import { waffle } from "hardhat"
 import { expect } from "./shared/expect"
-import { BigNumber, BigNumberish, utils } from 'ethers'
+import { BigNumber, BigNumberish, utils, Wallet } from 'ethers'
 
 import { boundingFixture } from "./shared/fixtures"
 
@@ -11,7 +11,7 @@ import { TestAggregator } from "../typechain/TestAggregator"
 import { TestCan } from "~/typechain/TestCan"
 import { CompoundStaking } from "~/gton-farms-evm/types/CompoundStaking"
 
-import {expandTo18Decimals, TokenData, mineBlocks} from "./shared/utils"
+import { expandTo18Decimals, TokenData, mineBlocks } from "./shared/utils"
 
 describe("Bounding", () => {
   const [wallet, treasury, admin0, admin1, bob, alice, denice, other] = waffle.provider.getWallets()
@@ -73,31 +73,33 @@ describe("Bounding", () => {
   })
 
   it("transfer ownership", async () => {
-    await expect(bounding.connect(other).transferOwnership(wallet.address)).to.be.revertedWith('Bounder: permitted to owner only.')
+    await expect(bounding.connect(other).transferOwnership(wallet.address)).to.be.revertedWith('Bounding: permitted to owner only.')
     await bounding.transferOwnership(other.address)
     expect(await bounding.owner()).to.eq(other.address)
   })
 
-  async function addDiscount({delta, discountMul, discountDiv}: {delta: BigNumber, discountMul: BigNumber, discountDiv: BigNumber}) {
-    await bounding.addDiscount(delta, discountMul, discountDiv)
+  interface Discount {
+    delta: BigNumber,
+    discountMul: BigNumber,
+    discountDiv: BigNumber
+  }
+
+  async function addDiscount(w: Wallet, { delta, discountMul, discountDiv }: Discount) {
+    await bounding.connect(w).addDiscount(delta, discountMul, discountDiv)
     const last = await bounding.discountsLength();
     const res = await bounding.discounts(last.sub(1));
     expect(res.delta).to.eq(delta)
     expect(res.discountMul).to.eq(discountMul)
     expect(res.discountDiv).to.eq(discountDiv)
   }
-  async function checkDiscount(id: number, discount: {
-    delta: BigNumber,
-    discountMul: BigNumber,
-    discountDiv: BigNumber,
-  }) {
+  async function checkDiscount(id: number, discount: Discount) {
     const res = await bounding.discounts(id);
     expect(res.delta).to.eq(discount.delta)
     expect(res.discountMul).to.eq(discount.discountMul)
     expect(res.discountDiv).to.eq(discount.discountDiv)
   }
 
-  const discounts = [
+  const discounts: Discount[] = [
     {
       delta: BigNumber.from(6000),
       discountMul: BigNumber.from(70),
@@ -114,33 +116,44 @@ describe("Bounding", () => {
       discountDiv: BigNumber.from(90),
     },
   ]
+
   it("add discount", async () => {
-    await expect(bounding.connect(other).addDiscount(1, 12, 1)).to.be.revertedWith('Bounder: permitted to owner only.')
-    await addDiscount(discounts[0])
+    await expect(bounding.connect(other).addDiscount(1, 12, 1)).to.be.revertedWith('Bounding: permitted to admins only.')
+    await addDiscount(wallet, discounts[0])
+
+    // expect admin to add discount
+    await addDiscount(admin0, discounts[1])
   })
 
   it("remove discount", async () => {
-    await addDiscount(discounts[0])
-    await addDiscount(discounts[1])
-    await addDiscount(discounts[2])
+    await addDiscount(wallet, discounts[0])
+    await addDiscount(wallet, discounts[1])
+    await addDiscount(wallet, discounts[2])
     expect(await bounding.discountsLength()).to.eq(3);
-    await expect(bounding.connect(other).rmDiscount(0)).to.be.revertedWith('Bounder: permitted to owner only.')
+    await expect(bounding.connect(other).rmDiscount(0)).to.be.revertedWith('Bounding: permitted to admins only.')
     await bounding.rmDiscount(0)
 
     // expect 3rd element to be swapped in place of 1st
     await checkDiscount(0, discounts[2])
     // expect 3rd element to be deleted
     await expect(bounding.discounts(2)).to.be.reverted
+
+    // expect admins to remove
+    await bounding.connect(admin0).rmDiscount(0)
+    // expect 2nd element to be swapped in place of 1st
+    await checkDiscount(0, discounts[1])
+    await expect(bounding.discounts(1)).to.be.reverted
   })
 
   it("change discount", async () => {
-    await addDiscount(discounts[2])
+    await addDiscount(wallet, discounts[2])
     await expect(bounding.connect(other).changeDiscount(
       0,
       discounts[1].delta,
       discounts[1].discountMul,
-      discounts[1].discountDiv)).to.be.revertedWith('Bounder: permitted to owner only.')
+      discounts[1].discountDiv)).to.be.revertedWith('Bounding: permitted to admins only.')
 
+    // expect owner to change discount
     await bounding.changeDiscount(
       0,
       discounts[1].delta,
@@ -148,24 +161,50 @@ describe("Bounding", () => {
       discounts[1].discountDiv)
 
     await checkDiscount(0, discounts[1])
+
+    // expect admin to change discount
+    await bounding.connect(admin1).changeDiscount(
+      0,
+      discounts[2].delta,
+      discounts[2].discountMul,
+      discounts[2].discountDiv)
+
+    await checkDiscount(0, discounts[2])
   })
 
+  async function getTokenAmount(amount: BigNumber, d: Discount, aggregator: TestAggregator): Promise<BigNumber> {
+    const gtonDecimals = await gtonAgg.decimals()
+    const gtonPrice = (await gtonAgg.latestRoundData()).answer
+    const tokenDecimals = await aggregator.decimals()
+    const tokenPrice = (await aggregator.latestRoundData()).answer
+
+    return amount.mul(tokenPrice).mul(gtonDecimals).mul(d.discountMul).div(gtonPrice).div(tokenDecimals).div(d.discountDiv)
+  }
   it("get token amount with discount", async () => {
     const t0 = discounts[0]
     const t1 = discounts[1]
-    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(10)))
-      .to.eq("17500000000000000000")
-    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(5)))
-      .to.eq("8750000000000000000")
-    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(30)))
-      .to.eq("52500000000000000000")
+    const t2 = discounts[2]
 
-      expect(await bounding.getTokenAmountWithDiscount(t1.discountMul, t1.discountDiv, token1Agg.address, expandTo18Decimals(10)))
-      .to.eq("2540000000000000000")
+    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(10)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(10), t0, token0Agg))
+    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(5)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(5), t0, token0Agg))
+    expect(await bounding.getTokenAmountWithDiscount(t0.discountMul, t0.discountDiv, token0Agg.address, expandTo18Decimals(30)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(30), t0, token0Agg))
+
+    expect(await bounding.getTokenAmountWithDiscount(t1.discountMul, t1.discountDiv, token1Agg.address, expandTo18Decimals(10)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(10), t1, token1Agg))
     expect(await bounding.getTokenAmountWithDiscount(t1.discountMul, t1.discountDiv, token1Agg.address, expandTo18Decimals(5)))
-      .to.eq("1270000000000000000")
+      .to.eq(await getTokenAmount(expandTo18Decimals(5), t1, token1Agg))
     expect(await bounding.getTokenAmountWithDiscount(t1.discountMul, t1.discountDiv, token1Agg.address, expandTo18Decimals(30)))
-      .to.eq("7620000000000000000")
+      .to.eq(await getTokenAmount(expandTo18Decimals(30), t1, token1Agg))
+
+    expect(await bounding.getTokenAmountWithDiscount(t2.discountMul, t2.discountDiv, wethAgg.address, expandTo18Decimals(10)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(10), t2, wethAgg))
+    expect(await bounding.getTokenAmountWithDiscount(t2.discountMul, t2.discountDiv, wethAgg.address, expandTo18Decimals(5)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(5), t2, wethAgg))
+    expect(await bounding.getTokenAmountWithDiscount(t2.discountMul, t2.discountDiv, wethAgg.address, expandTo18Decimals(30)))
+      .to.eq(await getTokenAmount(expandTo18Decimals(30), t2, wethAgg))
   })
 
   async function checkToken(id: BigNumberish, { can, price, minimalAmount }: TokenData) {
@@ -177,81 +216,120 @@ describe("Bounding", () => {
     expect(token.minimalAmount).to.eq(minimalAmount)
   }
 
-  async function addToken({ can, price, minimalAmount }: TokenData) {
+  async function addToken(w: Wallet, { can, price, minimalAmount }: TokenData) {
     await bounding.addAllowedToken(price.address, can.address, minimalAmount)
     const last = await bounding.tokensLength();
-    await checkToken(last.sub(1), {can, price, minimalAmount})
+    await checkToken(last.sub(1), { can, price, minimalAmount })
   }
 
   it("add token", async () => {
+    await expect(bounding.connect(other).addDiscount(1, 12, 1)).to.be.revertedWith('Bounding: permitted to admins only.')
     for (const item of tokens) {
-      await addToken(item)
+      await addToken(wallet, item)
+    }
+    for (const item of tokens) {
+      await addToken(admin1, item)
     }
   })
 
   it("remove token", async () => {
-    const token = tokens[0]
-    await expect(bounding.connect(other)
-      .addAllowedToken(token.price.address, token.can.address, token.minimalAmount))
-      .to.be.revertedWith("Bounder: permitted to owner only.");
     for (const item of tokens) {
-      await addToken(item)
+      await addToken(wallet, item)
     }
-    await expect(bounding.connect(other).rmAllowedToken(0)).to.be.revertedWith("Bounder: permitted to owner only.");
+    await expect(bounding.connect(other).rmAllowedToken(0)).to.be.revertedWith("Bounding: permitted to admins only.");
     expect(await bounding.tokensLength()).to.eq(tokens.length);
-    console.log(await bounding.tokensLength());
-    
+    await checkToken(0, tokens[0]);
     await bounding.rmAllowedToken(0)
 
     // expect 3rd element to be swapped in place of 1st
     await checkToken(0, tokens[2])
     // expect 3rd element to be deleted
     await expect(bounding.allowedTokens(2)).to.be.reverted
+
+    await bounding.connect(admin0).rmAllowedToken(0)
+    // expect 2rd element to be swapped in place of 1st
+    await checkToken(0, tokens[1])
+    // expect 2rd element to be deleted
+    await expect(bounding.allowedTokens(1)).to.be.reverted
   })
 
   it("change token", async () => {
     const token0 = tokens[0]
     const token1 = tokens[1]
-    await addToken(token0)
+    const token2 = tokens[2]
+    await addToken(wallet, token0)
     const last = await bounding.tokensLength();
 
     await expect(bounding.connect(other)
       .changeAllowedToken(last.sub(1), token1.price.address, token1.can.address, token1.minimalAmount))
-      .to.be.revertedWith("Bounder: permitted to owner only.");
+      .to.be.revertedWith("Bounding: permitted to admins only.");
 
     await bounding.changeAllowedToken(last.sub(1), token1.price.address, token1.can.address, token1.minimalAmount)
     checkToken(last.sub(1), token1)
+
+    await bounding.connect(admin0).changeAllowedToken(last.sub(1), token2.price.address, token2.can.address, token2.minimalAmount)
+    checkToken(last.sub(1), token2)
+  })
+
+  it("change changeAllowedRewardPerTry", async () => {
+    const amount = BigNumber.from("1422000000000")
+    await expect(bounding.connect(other).changeAllowedRewardPerTry(amount))
+      .to.be.revertedWith("Bounding: permitted to admins only.");
+
+    await bounding.changeAllowedRewardPerTry(amount);
+    expect(await bounding.allowedRewardPerTry()).to.eq(amount);
+    await bounding.connect(admin1).changeAllowedRewardPerTry(amount.add('600000000'));
+    expect(await bounding.allowedRewardPerTry()).to.eq(amount.add('600000000'));
   })
 
   it("create bound", async () => {
     const token = tokens[0]
-    const dis = discounts[0]
+    const dis = discounts[2]
     const wrongDis = discounts[1]
-    await addDiscount(dis) // id 0
-    await addToken(token) // id 0 
+    await addDiscount(wallet, dis) // id 0
+    await addToken(wallet, token) // id 0 
 
-    await expect(bounding.createBound(0, 0, token1.address, expandTo18Decimals(10),dis.discountMul, dis.discountDiv))
-    .to.be.revertedWith("Bounding: wrong token address.");
-    await expect(bounding.createBound(0, 0, token0.address, expandTo18Decimals(10),wrongDis.discountMul, wrongDis.discountDiv))
-    .to.be.revertedWith("Bounding: discound policy has changed.");
+    await expect(bounding.createBound(0, 0, token1.address, expandTo18Decimals(10), dis.discountMul, dis.discountDiv))
+      .to.be.revertedWith("Bounding: wrong token address.");
+    await expect(bounding.createBound(0, 0, token0.address, expandTo18Decimals(10), wrongDis.discountMul, wrongDis.discountDiv))
+      .to.be.revertedWith("Bounding: discound policy has changed.");
     await expect(bounding.createBound(0, 0, token0.address, token.minimalAmount.sub(1), dis.discountMul, dis.discountDiv))
-    .to.be.revertedWith("Bounding: amount lower than minimal");
-    await expect(bounding.createBound(0, 0, token0.address, token.minimalAmount,dis.discountMul, dis.discountDiv))
+      .to.be.revertedWith("Bounding: amount lower than minimal");
+    await expect(bounding.createBound(0, 0, token0.address, token.minimalAmount, dis.discountMul, dis.discountDiv))
       .to.be.reverted;
+
     await token0.approve(bounding.address, token.minimalAmount);
+
+    const amount = await getTokenAmount(token.minimalAmount, dis, token0Agg);
+    const expectedAmount = amount.mul(10000).div(await bounding.allowedRewardPerTry());
+    await gton.transfer(bounding.address, expectedAmount.sub(1))
+
+    await expect(bounding.createBound(0, 0, token0.address, token.minimalAmount, dis.discountMul, dis.discountDiv))
+          .to.be.revertedWith("Bounding: claim exceeds allowance of gton.")
+    
+    await gton.transfer(bounding.address, 2)
+
+    // contract gton balance is not enough to stake amount in compound
+    await expect(bounding.createBound(0, 0, token0.address, token.minimalAmount, dis.discountMul, dis.discountDiv))
+    .to.be.revertedWith("ds-math-sub-underflow")
+
+    await gton.transfer(bounding.address, expandTo18Decimals(10000))
+    
     await bounding.createBound(0, 0, token0.address, token.minimalAmount, dis.discountMul, dis.discountDiv)
     expect(await token0.balanceOf(treasury.address)).to.be.eq(token.minimalAmount)
     const data = await bounding.userUnlock(wallet.address, 0)
-    expect(data.rewardDebt).to.eq(0)    
-    expect(data.amount).to.eq("17500000000000000")    
+    expect(data.rewardDebt).to.eq(0)
+    expect(data.amount).to.eq(await compound.balanceToShare(amount))
     expect(data.delta).to.eq(dis.delta)
+
+    expect(await compound.balanceOf(bounding.address)).to.eq(expectedAmount)
   })
 
   it("claim bound", async () => {
     const token = tokens[0]
     const dis = discounts[0]
-    await addDiscount(dis) // id 0
-    await addToken(token) // id 0 
+    await addDiscount(wallet, dis) // id 0
+    await addToken(wallet, token) // id 0 
 
     await gton.transfer(bounding.address, expandTo18Decimals(10000))
     await expect(bounding.claimBoundTotal(wallet.address)).to.be.reverted; // throws error out of bounds
@@ -262,40 +340,39 @@ describe("Bounding", () => {
     const recvAmount = await bounding.getTokenAmountWithDiscount(dis.discountMul, dis.discountDiv, token0Agg.address, token.minimalAmount)
     const maxAmount1 = recvAmount.div(dis.delta)
     await expect(bounding.claimBoundTotal(wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
-    
+
     await mineBlocks(waffle.provider, 6000)
-    
+
     const balanceBefore = await gton.balanceOf(wallet.address)
     const maxAmount2 = recvAmount.mul(6000).div(dis.delta)
     await expect(bounding.claimBoundTotal(wallet.address)).to.be.revertedWith("Bounding: not enough of unlocked token.")
-    
+
     bounding.claimBoundTotal(wallet.address)
     expect(await gton.balanceOf(wallet.address)).to.eq(balanceBefore.add(maxAmount2))
     await expect(bounding.userUnlock(wallet.address, 0)).to.be.reverted;
   })
-  async function getRewardOut({discountMul, discountDiv, delta}: {delta: BigNumber, discountMul: BigNumber, discountDiv: BigNumber}, 
-      agg: TestAggregator, amount: BigNumber, blockAmount: number) {
+
+  async function getRewardOut({ discountMul, discountDiv, delta }: Discount,
+    agg: TestAggregator, amount: BigNumber, blockAmount: number) {
     const passedBlocks = (await waffle.provider.getBlock("latest")).number
     const lastBound = await bounding.boundsLength(wallet.address);
-    const startBlock = (await bounding.userUnlock(wallet.address,lastBound.sub(1))).startBlock.toNumber()
+    const startBlock = (await bounding.userUnlock(wallet.address, lastBound.sub(1))).startBlock.toNumber()
     const amountRecv = await bounding.getTokenAmountWithDiscount(discountMul, discountDiv, agg.address, amount)
     let a;
-    if((blockAmount + passedBlocks - startBlock) >= delta.toNumber()) {
+    if ((blockAmount + passedBlocks - startBlock) >= delta.toNumber()) {
       a = amountRecv
     } else {
       a = amountRecv.mul(blockAmount + passedBlocks - startBlock).div(delta)
     }
-    console.log("c");
-    console.log(a.toString());
     return a;
   }
   it("claim total bound", async () => {
     const blockAmount = 10000;
-    for(const item of discounts) {
-      await addDiscount(item)
+    for (const item of discounts) {
+      await addDiscount(wallet, item)
     }
-    for(const token of tokens) {
-      await addToken(token)
+    for (const token of tokens) {
+      await addToken(wallet, token)
     }
     await gton.transfer(bounding.address, expandTo18Decimals(10000))
 
@@ -316,7 +393,7 @@ describe("Bounding", () => {
     const a4 = await getRewardOut(discounts[1], token1Agg, tokens[1].minimalAmount, blockAmount)
 
     await mineBlocks(waffle.provider, blockAmount - 1) // to count upcoming txn with claim
-    
+
     await bounding.claimBoundTotal(other.address);
     const total = a1.add(a2).add(a3).add(a4)
     expect(await gton.balanceOf(other.address)).to.eq(total)

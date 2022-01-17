@@ -74,8 +74,8 @@
       ]
     },
     "/Users/googrand/projects/bonding/contracts/Bounding.sol": {
-      "lastModificationDate": 1642017784885,
-      "contentHash": "2cec98528d7dae14376868e0d41e75a3",
+      "lastModificationDate": 1642448870810,
+      "contentHash": "8e9e391f54fc4917c4a9949a3b9dcdea",
       "sourceName": "contracts/Bounding.sol",
       "solcConfig": {
         "version": "0.8.0",

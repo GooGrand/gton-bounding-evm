@@ -71,7 +71,7 @@ export const boundingFixture: Fixture<Boundingfixture> = async function ([
         gtonAgg.address, 
         treasury.address, 
         [admin0.address, admin1.address],
-        BigNumber.from("100000000"),
+        BigNumber.from("100000000000"),
         )) as Bounding
 
     return {
